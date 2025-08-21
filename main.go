@@ -230,8 +230,29 @@ func watchFolder(cfg FolderConfig, pollInterval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(pollInterval)
 		defer ticker.Stop()
+
+		slog.Info("started periodic polling",
+			"path", cfg.Path,
+			"interval", pollInterval.String())
+
 		for range ticker.C {
-			enforceTree(cfg)
+			slog.Debug("running periodic enforcement", "path", cfg.Path)
+			fixed, skipped, failed := enforceTree(cfg)
+
+			// Only log if there were changes or errors
+			if fixed > 0 || failed > 0 {
+				slog.Info("periodic enforcement complete",
+					"path", cfg.Path,
+					"fixed", fixed,
+					"skipped", skipped,
+					"failed", failed,
+				)
+			} else {
+				slog.Debug("periodic enforcement complete, no changes needed",
+					"path", cfg.Path,
+					"skipped", skipped,
+				)
+			}
 		}
 	}()
 
