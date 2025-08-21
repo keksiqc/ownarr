@@ -1,0 +1,9 @@
+services:
+  ownarr:
+    image: "ghcr.io/keksiqc/ownarr:latest"
+    environment:
+      TZ: "Europe/Berlin"
+      # DEBUG: true # Enable debug logging
+      WATCH_FOLDERS: "/data:1000:1000:775"
+    volumes:
+      - ./data:/data
