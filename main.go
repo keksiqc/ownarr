@@ -142,10 +142,13 @@ func watchFolder(cfg FolderConfig) {
 	}
 	defer watcher.Close()
 
-	if err := watcher.Add(cfg.Path); err != nil {
-		slog.Error("failed to watch folder", "path", cfg.Path, "error", err)
-		os.Exit(1)
-	}
+	// Add initial folder recursively
+	filepath.Walk(cfg.Path, func(path string, info os.FileInfo, err error) error {
+		if err == nil && info.IsDir() {
+			watcher.Add(path)
+		}
+		return nil
+	})
 
 	slog.Info("started watching folder",
 		"path", cfg.Path,
@@ -163,6 +166,14 @@ func watchFolder(cfg FolderConfig) {
 		"failed", failed,
 	)
 
+	// Polling fallback (every 30s)
+	go func() {
+		for {
+			time.Sleep(30 * time.Second)
+			enforceTree(cfg)
+		}
+	}()
+
 	// Event loop
 	for {
 		select {
@@ -171,9 +182,16 @@ func watchFolder(cfg FolderConfig) {
 				return
 			}
 
-			// Filter out noisy CHMOD events
+			// Add new directories to watcher
+			if event.Op&fsnotify.Create != 0 {
+				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+					watcher.Add(event.Name)
+					slog.Info("added new directory to watcher", "path", event.Name)
+				}
+			}
+
+			// Ignore CHMOD spam
 			if event.Op&fsnotify.Chmod != 0 {
-				slog.Debug("ignoring chmod event", "path", event.Name)
 				continue
 			}
 
