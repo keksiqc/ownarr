@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -21,13 +22,15 @@ type FolderConfig struct {
 	Mode os.FileMode
 }
 
-//
-// ─── CONFIG PARSING ─────────────────────────────────────────────────────────────
-//
+// Config holds the application configuration
+type Config struct {
+	Folders      []FolderConfig
+	LogLevel     slog.Leveler
+	Timezone     *time.Location
+	PollInterval time.Duration
+}
 
-// parseConfig parses a single folder config string in the format:
-//
-//	/path:uid:gid:mode
+// parseConfig parses a single folder config string in the format: /path:uid:gid:mode
 func parseConfig(configStr string) (FolderConfig, error) {
 	parts := strings.Split(configStr, ":")
 	if len(parts) != 4 {
@@ -55,9 +58,68 @@ func parseConfig(configStr string) (FolderConfig, error) {
 	}, nil
 }
 
-//
-// ─── PERMISSION ENFORCEMENT ─────────────────────────────────────────────────────
-//
+// loadConfig loads configuration from environment variables
+func loadConfig() (*Config, error) {
+	cfg := &Config{
+		PollInterval: 30 * time.Second,
+	}
+
+	// Log level
+	if strings.ToLower(os.Getenv("DEBUG")) == "true" {
+		cfg.LogLevel = slog.LevelDebug
+	} else {
+		cfg.LogLevel = slog.LevelInfo
+	}
+
+	// Timezone
+	if tz := os.Getenv("TZ"); tz != "" {
+		loc, err := time.LoadLocation(tz)
+		if err != nil {
+			slog.Warn("invalid TZ, falling back to UTC", "tz", tz, "error", err)
+			cfg.Timezone = time.UTC
+		} else {
+			cfg.Timezone = loc
+		}
+	} else {
+		cfg.Timezone = time.UTC
+	}
+
+	// Poll interval
+	if pollInterval := os.Getenv("POLL_INTERVAL"); pollInterval != "" {
+		if interval, err := time.ParseDuration(pollInterval); err == nil {
+			cfg.PollInterval = interval
+		}
+	}
+
+	// Watch folders
+	env := os.Getenv("WATCH_FOLDERS")
+	if env == "" {
+		return nil, fmt.Errorf("WATCH_FOLDERS environment variable not set")
+	}
+
+	configStrs := strings.Split(env, ",")
+	cfg.Folders = make([]FolderConfig, 0, len(configStrs))
+
+	for _, cfgStr := range configStrs {
+		cfgStr = strings.TrimSpace(cfgStr)
+		if cfgStr == "" {
+			continue
+		}
+
+		folderCfg, err := parseConfig(cfgStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid config %q: %w", cfgStr, err)
+		}
+
+		cfg.Folders = append(cfg.Folders, folderCfg)
+	}
+
+	if len(cfg.Folders) == 0 {
+		return nil, fmt.Errorf("no folder configs provided in WATCH_FOLDERS")
+	}
+
+	return cfg, nil
+}
 
 // enforceTree walks the entire folder tree and ensures ownership and permissions.
 // Returns counts of fixed, skipped, and failed files.
@@ -129,23 +191,21 @@ func enforceFile(cfg FolderConfig, path string) {
 	}
 }
 
-//
-// ─── WATCHER ────────────────────────────────────────────────────────────────────
-//
-
 // watchFolder sets up a watcher for a folder and enforces permissions on changes.
-func watchFolder(cfg FolderConfig) {
+func watchFolder(cfg FolderConfig, pollInterval time.Duration) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		slog.Error("failed to create watcher", "error", err)
-		os.Exit(1)
+		return
 	}
 	defer watcher.Close()
 
 	// Add initial folder recursively
 	filepath.Walk(cfg.Path, func(path string, info os.FileInfo, err error) error {
 		if err == nil && info.IsDir() {
-			watcher.Add(path)
+			if err := watcher.Add(path); err != nil {
+				slog.Warn("failed to add path to watcher", "path", path, "error", err)
+			}
 		}
 		return nil
 	})
@@ -166,10 +226,11 @@ func watchFolder(cfg FolderConfig) {
 		"failed", failed,
 	)
 
-	// Polling fallback (every 30s)
+	// Polling fallback
 	go func() {
-		for {
-			time.Sleep(30 * time.Second)
+		ticker := time.NewTicker(pollInterval)
+		defer ticker.Stop()
+		for range ticker.C {
 			enforceTree(cfg)
 		}
 	}()
@@ -185,8 +246,11 @@ func watchFolder(cfg FolderConfig) {
 			// Add new directories to watcher
 			if event.Op&fsnotify.Create != 0 {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					watcher.Add(event.Name)
-					slog.Info("added new directory to watcher", "path", event.Name)
+					if err := watcher.Add(event.Name); err != nil {
+						slog.Warn("failed to add new directory to watcher", "path", event.Name, "error", err)
+					} else {
+						slog.Info("added new directory to watcher", "path", event.Name)
+					}
 				}
 			}
 
@@ -195,7 +259,7 @@ func watchFolder(cfg FolderConfig) {
 				continue
 			}
 
-			slog.Info("event detected", "path", event.Name, "op", event.Op.String())
+			slog.Debug("event detected", "path", event.Name, "op", event.Op.String())
 
 			if event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
 				enforceFile(cfg, event.Name)
@@ -210,69 +274,40 @@ func watchFolder(cfg FolderConfig) {
 	}
 }
 
-//
-// ─── LOGGING & ENV SETUP ───────────────────────────────────────────────────────
-//
-
-// setupLogging configures slog based on DEBUG and TZ env vars.
-func setupLogging() {
-	// Timezone
-	if tz := os.Getenv("TZ"); tz != "" {
-		loc, err := time.LoadLocation(tz)
-		if err != nil {
-			slog.Warn("invalid TZ, falling back to UTC", "tz", tz, "error", err)
-			time.Local = time.UTC
-		} else {
-			time.Local = loc
-		}
+func main() {
+	// Load configuration
+	cfg, err := loadConfig()
+	if err != nil {
+		slog.Error("configuration error", "error", err)
+		os.Exit(1)
 	}
 
-	// Log level
-	level := slog.LevelInfo
-	if strings.ToLower(os.Getenv("DEBUG")) == "true" {
-		level = slog.LevelDebug
+	// Set up logging
+	opts := &slog.HandlerOptions{
+		Level: cfg.LogLevel,
 	}
+	handler := slog.NewTextHandler(os.Stdout, opts)
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+
+	// Set timezone
+	time.Local = cfg.Timezone
 
 	slog.Info("Ownarr starting up",
 		"tz", time.Now().Location().String(),
-		"debug", level == slog.LevelDebug,
+		"debug", cfg.LogLevel == slog.LevelDebug,
 	)
-}
 
-//
-// ─── MAIN ──────────────────────────────────────────────────────────────────────
-//
+	// Set up signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-func main() {
-	setupLogging()
-
-	env := os.Getenv("WATCH_FOLDERS")
-	if env == "" {
-		slog.Error("WATCH_FOLDERS environment variable not set")
-		os.Exit(1)
+	// Start watching folders
+	for _, folderCfg := range cfg.Folders {
+		go watchFolder(folderCfg, cfg.PollInterval)
 	}
 
-	configs := strings.Split(env, ",")
-	if len(configs) == 0 {
-		slog.Error("no folder configs provided in WATCH_FOLDERS")
-		os.Exit(1)
-	}
-
-	for _, cfgStr := range configs {
-		cfgStr = strings.TrimSpace(cfgStr)
-		if cfgStr == "" {
-			continue
-		}
-
-		cfg, err := parseConfig(cfgStr)
-		if err != nil {
-			slog.Error("invalid config", "config", cfgStr, "error", err)
-			os.Exit(1)
-		}
-
-		go watchFolder(cfg)
-	}
-
-	// Block forever
-	select {}
+	// Wait for termination signal
+	<-sigChan
+	slog.Info("Received termination signal, shutting down...")
 }
