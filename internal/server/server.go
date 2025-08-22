@@ -22,7 +22,7 @@ func New(port int, logger *logger.Logger) *Server {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"ok","timestamp":"%s"}`, time.Now().Format(time.RFC3339))
+		log.Debug("Health check requested", "timestamp", time.Now().Format(time.RFC3339))
 	})
 
 	// Add logging middleware
