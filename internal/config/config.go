@@ -6,7 +6,18 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
+
+// YAMLConfig represents the structure of the YAML configuration file
+type YAMLConfig struct {
+	Port         int      `yaml:"port,omitempty"`
+	LogLevel     string   `yaml:"logLevel,omitempty"`
+	PollInterval string   `yaml:"pollInterval,omitempty"`
+	Timezone     string   `yaml:"timezone,omitempty"`
+	Folders      []string `yaml:"folders,omitempty"`
+}
 
 type Folder struct {
 	Path string
@@ -56,8 +67,50 @@ func (c *Config) loadFolders() error {
 }
 
 func (c *Config) loadFromFile(filename string) error {
-	// For now, skip config file loading - can be added later with YAML support
-	return fmt.Errorf("config file loading not implemented")
+	// Read the YAML file
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("reading config file: %w", err)
+	}
+
+	// Parse the YAML data
+	var yamlConfig YAMLConfig
+	if err := yaml.Unmarshal(data, &yamlConfig); err != nil {
+		return fmt.Errorf("parsing config file: %w", err)
+	}
+
+	// Convert YAML config to internal config
+	if yamlConfig.Port != 0 {
+		c.Port = yamlConfig.Port
+	}
+	
+	if yamlConfig.LogLevel != "" {
+		c.LogLevel = yamlConfig.LogLevel
+	}
+	
+	if yamlConfig.PollInterval != "" {
+		if duration, err := time.ParseDuration(yamlConfig.PollInterval); err == nil {
+			c.PollInterval = duration
+		}
+	}
+	
+	if yamlConfig.Timezone != "" {
+		if loc, err := time.LoadLocation(yamlConfig.Timezone); err == nil {
+			c.Timezone = loc
+		}
+	}
+
+	// Parse folders
+	c.Folders = make([]Folder, 0, len(yamlConfig.Folders))
+	for _, folderStr := range yamlConfig.Folders {
+		folder, err := parseFolderConfig(folderStr)
+		if err != nil {
+			return fmt.Errorf("invalid folder config %q: %w", folderStr, err)
+		}
+		c.Folders = append(c.Folders, folder)
+	}
+
+	return nil
 }
 
 func (c *Config) loadFromEnv() error {

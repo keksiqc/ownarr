@@ -1,0 +1,27 @@
+# Example configuration file for ownarr
+# This file demonstrates all available configuration options
+
+# Port to listen on (default: 8080)
+port: 8080
+
+# Log level (default: "info")
+# Valid values: "debug", "info", "warn", "error"
+logLevel: "info"
+
+# Polling interval for checking folder changes (default: "30s")
+# Format: number with unit (e.g., "10s", "5m", "1h")
+pollInterval: "30s"
+
+# Timezone for logging and scheduling (default: "UTC")
+# Uses standard timezone names (e.g., "America/New_York", "Europe/London")
+timezone: "UTC"
+
+# List of folders to monitor
+# Format for each folder: "/path:uid:gid:mode"
+# - path: absolute path to the folder
+# - uid: user ID for ownership
+# - gid: group ID for ownership
+# - mode: octal permissions (e.g., "755", "644")
+folders:
+  - "/data/media:1000:1000:755"
+  - "/data/downloads:1000:1000:755"
