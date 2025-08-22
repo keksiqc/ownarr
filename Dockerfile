@@ -34,6 +34,6 @@ COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=build /usr/bin/curl /usr/bin/curl
 
 HEALTHCHECK --interval=5s --timeout=2s --start-interval=5s \
-    CMD ["/usr/bin/curl", "-X", "GET", "-kILs", "--fail", "http://localhost:8080/"]
+    CMD ["/usr/bin/curl", "-X", "GET", "-kILs", "--fail", "http://localhost:8080/health"]
 
 ENTRYPOINT ["/ownarr"]
