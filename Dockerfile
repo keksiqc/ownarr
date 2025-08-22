@@ -19,11 +19,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
 RUN apk add --no-cache upx && \
     upx -q --no-backup -9 --lzma /out/ownarr || true
 
+# Install timezone database and curl
+RUN apk add --no-cache tzdata curl
+
 # Final stage
 FROM scratch
 
 ENV PORT=8080
-ENV CONFIG_FILE=/ownarr/etc/config.yaml
 
 # Copy binary
 COPY --from=build /out/ownarr /ownarr
@@ -33,8 +35,6 @@ COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 
 # Copy curl for healthcheck
 COPY --from=build /usr/bin/curl /usr/bin/curl
-
-VOLUME ["/ownarr/etc"]
 
 HEALTHCHECK --interval=5s --timeout=2s --start-interval=5s \
     CMD ["/usr/bin/curl", "-X", "GET", "-kILs", "--fail", "http://localhost:8080/health"]
