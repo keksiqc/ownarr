@@ -2,6 +2,7 @@
   channel = "unstable";
   packages = [
     pkgs.go
+    pkgs.golangci-lint
     pkgs.gnumake
   ];
   services = {

@@ -1,8 +1,12 @@
-.PHONY: build fmt clean run help
+.PHONY: build lint fmt clean run help
 
 # Build the binary
 build:
 	go build -o bin/ownarr cmd/ownarr/main.go
+
+# Lint code
+lint:
+	golangci-lint run
 
 # Format code
 fmt:
