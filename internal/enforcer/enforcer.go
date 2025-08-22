@@ -3,7 +3,6 @@ package enforcer
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -11,17 +10,20 @@ import (
 	"time"
 
 	"github.com/keksiqc/ownarr/internal/config"
+	"github.com/keksiqc/ownarr/internal/logger"
 )
 
 type Enforcer struct {
 	config *config.Config
+	logger *logger.Logger
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
 }
 
-func New(cfg *config.Config) *Enforcer {
+func New(cfg *config.Config, logger *logger.Logger) *Enforcer {
 	return &Enforcer{
 		config: cfg,
+		logger: logger.With("component", "enforcer"),
 	}
 }
 
@@ -53,15 +55,18 @@ func (e *Enforcer) watchFolder(ctx context.Context, folder config.Folder) {
 	ticker := time.NewTicker(e.config.PollInterval)
 	defer ticker.Stop()
 
-	log.Printf("Started watching %s (uid=%d gid=%d mode=%o)",
-		folder.Path, folder.UID, folder.GID, folder.Mode)
+	e.logger.Info("Started watching folder",
+		"path", folder.Path,
+		"uid", folder.UID,
+		"gid", folder.GID,
+		"mode", fmt.Sprintf("%o", folder.Mode))
 
 	for {
 		select {
 		case <-ticker.C:
 			e.enforceTree(folder)
 		case <-ctx.Done():
-			log.Printf("Stopped watching %s", folder.Path)
+			e.logger.Info("Stopped watching folder", "path", folder.Path)
 			return
 		}
 	}
@@ -72,14 +77,14 @@ func (e *Enforcer) enforceTree(folder config.Folder) {
 
 	err := filepath.Walk(folder.Path, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			log.Printf("Error accessing %s: %v", path, err)
+			e.logger.Error("Error accessing path", "path", path, "error", err)
 			failed++
 			return nil
 		}
 
 		changed, err := e.enforceFile(folder, path, info)
 		if err != nil {
-			log.Printf("Error enforcing %s: %v", path, err)
+			e.logger.Error("Error enforcing file", "path", path, "error", err)
 			failed++
 			return nil
 		}
@@ -94,12 +99,15 @@ func (e *Enforcer) enforceTree(folder config.Folder) {
 	})
 
 	if err != nil {
-		log.Printf("Error walking %s: %v", folder.Path, err)
+		e.logger.Error("Error walking folder", "path", folder.Path, "error", err)
 	}
 
 	if fixed > 0 || failed > 0 {
-		log.Printf("Enforcement complete for %s: fixed=%d skipped=%d failed=%d",
-			folder.Path, fixed, skipped, failed)
+		e.logger.Info("Enforcement complete",
+			"folder", folder.Path,
+			"fixed", fixed,
+			"skipped", skipped,
+			"failed", failed)
 	}
 }
 
