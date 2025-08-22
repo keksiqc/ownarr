@@ -48,6 +48,12 @@ func (e *Enforcer) Stop() {
 func (e *Enforcer) watchFolder(ctx context.Context, folder config.Folder) {
 	defer e.wg.Done()
 
+	e.logger.Info("Starting initial enforcement",
+		"path", folder.Path,
+		"uid", folder.UID,
+		"gid", folder.GID,
+		"mode", fmt.Sprintf("%o", folder.Mode))
+
 	// Initial enforcement
 	e.enforceTree(folder)
 
@@ -57,13 +63,12 @@ func (e *Enforcer) watchFolder(ctx context.Context, folder config.Folder) {
 
 	e.logger.Info("Started watching folder",
 		"path", folder.Path,
-		"uid", folder.UID,
-		"gid", folder.GID,
-		"mode", fmt.Sprintf("%o", folder.Mode))
+		"interval", e.config.PollInterval.String())
 
 	for {
 		select {
 		case <-ticker.C:
+			e.logger.Debug("Periodic enforcement tick", "path", folder.Path)
 			e.enforceTree(folder)
 		case <-ctx.Done():
 			e.logger.Info("Stopped watching folder", "path", folder.Path)
@@ -121,6 +126,13 @@ func (e *Enforcer) enforceFile(folder config.Folder, path string, info os.FileIn
 
 	// Check ownership
 	if int(stat.Uid) != folder.UID || int(stat.Gid) != folder.GID {
+		e.logger.Debug("Fixing ownership",
+			"path", path,
+			"current_uid", stat.Uid,
+			"current_gid", stat.Gid,
+			"target_uid", folder.UID,
+			"target_gid", folder.GID)
+
 		if err := os.Chown(path, folder.UID, folder.GID); err != nil {
 			return false, fmt.Errorf("chown: %w", err)
 		}
@@ -131,10 +143,23 @@ func (e *Enforcer) enforceFile(folder config.Folder, path string, info os.FileIn
 	currentMode := info.Mode() & os.ModePerm
 	targetMode := folder.Mode & os.ModePerm
 	if currentMode != targetMode {
+		e.logger.Debug("Fixing permissions",
+			"path", path,
+			"current_mode", fmt.Sprintf("%o", currentMode),
+			"target_mode", fmt.Sprintf("%o", targetMode))
+
 		if err := os.Chmod(path, folder.Mode); err != nil {
 			return false, fmt.Errorf("chmod: %w", err)
 		}
 		changed = true
+	}
+
+	if changed {
+		e.logger.Info("Fixed file",
+			"path", path,
+			"uid", folder.UID,
+			"gid", folder.GID,
+			"mode", fmt.Sprintf("%o", folder.Mode))
 	}
 
 	return changed, nil

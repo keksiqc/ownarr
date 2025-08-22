@@ -26,7 +26,8 @@ func main() {
 
 	// Update log level based on config
 	log = logger.New(cfg.LogLevel)
-	log.Info("Starting ownarr",
+	log.Info("Starting ownarr")
+	log.Info("Configuration loaded",
 		"port", cfg.Port,
 		"log_level", cfg.LogLevel,
 		"poll_interval", cfg.PollInterval,
