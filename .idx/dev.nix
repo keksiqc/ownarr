@@ -2,6 +2,7 @@
   channel = "unstable";
   packages = [
     pkgs.go
+    pkgs.gnumake
   ];
   services = {
     docker.enable = true;
