@@ -1,9 +1,11 @@
 services:
   ownarr:
-    image: "ghcr.io/keksiqc/ownarr:latest"
+    build: .
     environment:
       TZ: "Europe/Berlin"
-      # DEBUG: true # Enable debug logging
-      WATCH_FOLDERS: "/data:1000:1000:775"
+      LOG_LEVEL: "info"
+      FOLDERS: "/data:1000:1000:775"
     volumes:
       - ./data:/data
+    ports:
+      - "8080:8080"
