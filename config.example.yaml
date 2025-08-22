@@ -17,11 +17,18 @@ pollInterval: "30s"
 timezone: "UTC"
 
 # List of folders to monitor
-# Format for each folder: "/path:uid:gid:mode"
-# - path: absolute path to the folder
-# - uid: user ID for ownership
-# - gid: group ID for ownership
-# - mode: octal permissions (e.g., "755", "644")
+# New format (recommended):
 folders:
-  - "/data/media:1000:1000:755"
-  - "/data/downloads:1000:1000:755"
+  - path: "/data/media"
+    uid: 1000
+    gid: 1000
+    mode: 755
+  - path: "/data/downloads"
+    uid: 1000
+    gid: 1000
+    mode: 755
+
+# Legacy format (still supported):
+# folders:
+#   - "/data/media:1000:1000:755"
+#   - "/data/downloads:1000:1000:755"

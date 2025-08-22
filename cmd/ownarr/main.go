@@ -20,7 +20,8 @@ func main() {
 
 	cfg, err := config.Load()
 	if err != nil {
-		log.WithError(err).Error("Configuration error")
+		log.WithError(err).Error("Failed to load configuration")
+		log.Error("Please check your configuration file or environment variables")
 		os.Exit(1)
 	}
 

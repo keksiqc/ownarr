@@ -46,13 +46,29 @@ pollInterval: "30s"
 # Timezone for logging and scheduling (default: "UTC")
 timezone: "UTC"
 
-# List of folders to monitor
+# List of folders to monitor (new format - recommended)
+folders:
+  - path: "/data/media"
+    uid: 1000
+    gid: 1000
+    mode: 755
+  - path: "/data/downloads"
+    uid: 1000
+    gid: 1000
+    mode: 755
+```
+
+See [config.example.yaml](config.example.yaml) for a complete example with comments.
+
+### Legacy Configuration Format
+
+The legacy folder configuration format is still supported for backward compatibility:
+
+```yaml
 folders:
   - "/data/media:1000:1000:755"
   - "/data/downloads:1000:1000:755"
 ```
-
-See [config.example.yaml](config.example.yaml) for a complete example with comments.
 
 ### Examples
 
