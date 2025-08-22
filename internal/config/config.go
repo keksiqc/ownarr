@@ -83,17 +83,17 @@ func (c *Config) loadFromFile(filename string) error {
 	if yamlConfig.Port != 0 {
 		c.Port = yamlConfig.Port
 	}
-	
+
 	if yamlConfig.LogLevel != "" {
 		c.LogLevel = yamlConfig.LogLevel
 	}
-	
+
 	if yamlConfig.PollInterval != "" {
 		if duration, err := time.ParseDuration(yamlConfig.PollInterval); err == nil {
 			c.PollInterval = duration
 		}
 	}
-	
+
 	if yamlConfig.Timezone != "" {
 		if loc, err := time.LoadLocation(yamlConfig.Timezone); err == nil {
 			c.Timezone = loc
