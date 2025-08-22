@@ -57,7 +57,7 @@ func loggingMiddleware(next http.Handler, logger *logger.Logger) http.Handler {
 		next.ServeHTTP(rw, r)
 
 		duration := time.Since(start)
-		logger.Info("HTTP request",
+		logger.Debug("HTTP request",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rw.statusCode,
