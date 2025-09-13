@@ -16,17 +16,31 @@ pollInterval: "30s"
 # Uses standard timezone names (e.g., "America/New_York", "Europe/London")
 timezone: "UTC"
 
+# Trash Guides folder structure setup (optional)
+# Automatically creates and manages the recommended Trash Guides folder structure
+trashGuides:
+  enabled: true
+  type: "usenet"  # "usenet" or "torrent"
+  rootPath: "/data"
+  mediaTypes: ["movies", "tv", "music", "books"]  # Optional, defaults to these
+  createStructure: true  # Whether to create directories
+  uid: 1000
+  gid: 1000
+  folderMode: 755
+  fileMode: 644
+
 # List of folders to monitor
-# New format (recommended):
+# New format with separate file and folder permissions (recommended):
 folders:
   - path: "/data/media"
     uid: 1000
     gid: 1000
-    mode: 755
+    folderMode: 755  # Permissions for directories
+    fileMode: 644    # Permissions for files
   - path: "/data/downloads"
     uid: 1000
     gid: 1000
-    mode: 755
+    mode: 755        # Legacy: same permissions for files and folders
 
 # Legacy format (still supported):
 # folders:

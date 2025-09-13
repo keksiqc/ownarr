@@ -21,27 +21,45 @@ const (
 
 // YAMLFolder represents a folder configuration in the YAML file
 type YAMLFolder struct {
-	Path string `yaml:"path"`
-	UID  int    `yaml:"uid"`
-	GID  int    `yaml:"gid"`
-	Mode int    `yaml:"mode"`
+	Path       string `yaml:"path"`
+	UID        int    `yaml:"uid"`
+	GID        int    `yaml:"gid"`
+	Mode       int    `yaml:"mode,omitempty"`       // Legacy: applies to both files and folders
+	FolderMode int    `yaml:"folderMode,omitempty"` // New: specific folder permissions
+	FileMode   int    `yaml:"fileMode,omitempty"`   // New: specific file permissions
+}
+
+// TrashGuidesConfig represents the Trash Guides folder structure configuration
+type TrashGuidesConfig struct {
+	Enabled         bool     `yaml:"enabled,omitempty"`
+	Type            string   `yaml:"type,omitempty"`            // "usenet" or "torrent"
+	RootPath        string   `yaml:"rootPath,omitempty"`        // Base path for structure
+	MediaTypes      []string `yaml:"mediaTypes,omitempty"`      // ["movies", "tv", "music", "books"]
+	CreateStructure bool     `yaml:"createStructure,omitempty"` // Whether to create directories
+	UID             int      `yaml:"uid,omitempty"`
+	GID             int      `yaml:"gid,omitempty"`
+	FolderMode      int      `yaml:"folderMode,omitempty"`
+	FileMode        int      `yaml:"fileMode,omitempty"`
 }
 
 // YAMLConfig represents the structure of the YAML configuration file
 type YAMLConfig struct {
-	Port         int          `yaml:"port,omitempty"`
-	LogLevel     string       `yaml:"logLevel,omitempty"`
-	PollInterval string       `yaml:"pollInterval,omitempty"`
-	Timezone     string       `yaml:"timezone,omitempty"`
-	Folders      []YAMLFolder `yaml:"folders,omitempty"`
+	Port         int                `yaml:"port,omitempty"`
+	LogLevel     string             `yaml:"logLevel,omitempty"`
+	PollInterval string             `yaml:"pollInterval,omitempty"`
+	Timezone     string             `yaml:"timezone,omitempty"`
+	Folders      []YAMLFolder       `yaml:"folders,omitempty"`
+	TrashGuides  *TrashGuidesConfig `yaml:"trashGuides,omitempty"`
 }
 
 // Folder represents a folder configuration with validated values
 type Folder struct {
-	Path string
-	UID  int
-	GID  int
-	Mode os.FileMode
+	Path       string
+	UID        int
+	GID        int
+	Mode       os.FileMode // Legacy: used when FolderMode/FileMode not specified
+	FolderMode os.FileMode // Specific permissions for folders
+	FileMode   os.FileMode // Specific permissions for files
 }
 
 // Validate checks that the folder configuration is valid
@@ -65,10 +83,31 @@ func (f Folder) Validate() error {
 		return fmt.Errorf("gid must be between 0 and 65535, got %d", f.GID)
 	}
 
-	// Validate mode is within reasonable range (0-0777)
-	mode := f.Mode & os.ModePerm
-	if mode > 0777 {
-		return fmt.Errorf("mode must be between 0 and 0777, got %o", mode)
+	// Validate modes are within reasonable range (0-0777)
+	if f.Mode != 0 {
+		mode := f.Mode & os.ModePerm
+		if mode > 0777 {
+			return fmt.Errorf("mode must be between 0 and 0777, got %o", mode)
+		}
+	}
+
+	if f.FolderMode != 0 {
+		mode := f.FolderMode & os.ModePerm
+		if mode > 0777 {
+			return fmt.Errorf("folderMode must be between 0 and 0777, got %o", mode)
+		}
+	}
+
+	if f.FileMode != 0 {
+		mode := f.FileMode & os.ModePerm
+		if mode > 0777 {
+			return fmt.Errorf("fileMode must be between 0 and 0777, got %o", mode)
+		}
+	}
+
+	// At least one mode must be specified
+	if f.Mode == 0 && f.FolderMode == 0 && f.FileMode == 0 {
+		return fmt.Errorf("at least one of mode, folderMode, or fileMode must be specified")
 	}
 
 	return nil
@@ -81,6 +120,7 @@ type Config struct {
 	PollInterval time.Duration
 	Timezone     *time.Location
 	Folders      []Folder
+	TrashGuides  *TrashGuidesConfig
 }
 
 // String returns a string representation of the config for logging
@@ -210,6 +250,20 @@ func (c *Config) loadFromFile(filename string) error {
 		c.Timezone = loc
 	}
 
+	// Parse TrashGuides configuration
+	if yamlConfig.TrashGuides != nil {
+		c.TrashGuides = yamlConfig.TrashGuides
+
+		// Generate Trash Guides folder structure if enabled
+		if c.TrashGuides.Enabled && c.TrashGuides.CreateStructure {
+			trashFolders, err := c.generateTrashGuidesStructure()
+			if err != nil {
+				return fmt.Errorf("failed to generate Trash Guides structure: %w", err)
+			}
+			c.Folders = append(c.Folders, trashFolders...)
+		}
+	}
+
 	// Parse folders
 	c.Folders = make([]Folder, 0, len(yamlConfig.Folders))
 	for _, yamlFolder := range yamlConfig.Folders {
@@ -217,8 +271,27 @@ func (c *Config) loadFromFile(filename string) error {
 			Path: yamlFolder.Path,
 			UID:  yamlFolder.UID,
 			GID:  yamlFolder.GID,
-			Mode: os.FileMode(yamlFolder.Mode),
 		}
+
+		// Handle backward compatibility with Mode field
+		if yamlFolder.Mode != 0 {
+			folder.Mode = os.FileMode(yamlFolder.Mode)
+		}
+
+		// Use specific folder/file modes if provided
+		if yamlFolder.FolderMode != 0 {
+			folder.FolderMode = os.FileMode(yamlFolder.FolderMode)
+		}
+		if yamlFolder.FileMode != 0 {
+			folder.FileMode = os.FileMode(yamlFolder.FileMode)
+		}
+
+		// If only legacy Mode is specified, use it for both files and folders
+		if folder.Mode != 0 && folder.FolderMode == 0 && folder.FileMode == 0 {
+			folder.FolderMode = folder.Mode
+			folder.FileMode = folder.Mode
+		}
+
 		c.Folders = append(c.Folders, folder)
 	}
 
@@ -344,4 +417,129 @@ func parseLegacyFolderConfig(config string) (Folder, error) {
 	}
 
 	return folder, nil
+}
+
+// generateTrashGuidesStructure generates the recommended Trash Guides folder structure
+func (c *Config) generateTrashGuidesStructure() ([]Folder, error) {
+	if c.TrashGuides == nil || !c.TrashGuides.Enabled {
+		return nil, nil
+	}
+
+	// Validate TrashGuides configuration
+	if c.TrashGuides.RootPath == "" {
+		return nil, fmt.Errorf("trashGuides.rootPath is required")
+	}
+
+	if c.TrashGuides.Type != "usenet" && c.TrashGuides.Type != "torrent" {
+		return nil, fmt.Errorf("trashGuides.type must be 'usenet' or 'torrent', got %q", c.TrashGuides.Type)
+	}
+
+	// Default media types
+	mediaTypes := c.TrashGuides.MediaTypes
+	if len(mediaTypes) == 0 {
+		mediaTypes = []string{"movies", "tv", "music", "books"}
+	}
+
+	// Default permissions from TrashGuides config or use defaults
+	folderMode := os.FileMode(0755)
+	fileMode := os.FileMode(0644)
+	uid := 1000
+	gid := 1000
+
+	if c.TrashGuides.FolderMode != 0 {
+		folderMode = os.FileMode(c.TrashGuides.FolderMode)
+	}
+	if c.TrashGuides.FileMode != 0 {
+		fileMode = os.FileMode(c.TrashGuides.FileMode)
+	}
+	if c.TrashGuides.UID != 0 {
+		uid = c.TrashGuides.UID
+	}
+	if c.TrashGuides.GID != 0 {
+		gid = c.TrashGuides.GID
+	}
+
+	var folders []Folder
+
+	// Create base directories
+	folders = append(folders, Folder{
+		Path:       filepath.Join(c.TrashGuides.RootPath, "media"),
+		UID:        uid,
+		GID:        gid,
+		FolderMode: folderMode,
+		FileMode:   fileMode,
+	})
+
+	folders = append(folders, Folder{
+		Path:       filepath.Join(c.TrashGuides.RootPath, "torrents"),
+		UID:        uid,
+		GID:        gid,
+		FolderMode: folderMode,
+		FileMode:   fileMode,
+	})
+
+	// For media folders
+	for _, mediaType := range mediaTypes {
+		folders = append(folders, Folder{
+			Path:       filepath.Join(c.TrashGuides.RootPath, "media", mediaType),
+			UID:        uid,
+			GID:        gid,
+			FolderMode: folderMode,
+			FileMode:   fileMode,
+		})
+
+		folders = append(folders, Folder{
+			Path:       filepath.Join(c.TrashGuides.RootPath, "torrents", mediaType),
+			UID:        uid,
+			GID:        gid,
+			FolderMode: folderMode,
+			FileMode:   fileMode,
+		})
+	}
+
+	// Add usenet-specific directories if type is usenet
+	if c.TrashGuides.Type == "usenet" {
+		folders = append(folders, Folder{
+			Path:       filepath.Join(c.TrashGuides.RootPath, "usenet"),
+			UID:        uid,
+			GID:        gid,
+			FolderMode: folderMode,
+			FileMode:   fileMode,
+		})
+
+		folders = append(folders, Folder{
+			Path:       filepath.Join(c.TrashGuides.RootPath, "usenet", "complete"),
+			UID:        uid,
+			GID:        gid,
+			FolderMode: folderMode,
+			FileMode:   fileMode,
+		})
+
+		folders = append(folders, Folder{
+			Path:       filepath.Join(c.TrashGuides.RootPath, "usenet", "incomplete"),
+			UID:        uid,
+			GID:        gid,
+			FolderMode: folderMode,
+			FileMode:   fileMode,
+		})
+
+		for _, mediaType := range mediaTypes {
+			folders = append(folders, Folder{
+				Path:       filepath.Join(c.TrashGuides.RootPath, "usenet", "complete", mediaType),
+				UID:        uid,
+				GID:        gid,
+				FolderMode: folderMode,
+				FileMode:   fileMode,
+			})
+		}
+	}
+
+	// Create directories if they don't exist
+	for _, folder := range folders {
+		if err := os.MkdirAll(folder.Path, folderMode); err != nil {
+			return nil, fmt.Errorf("failed to create directory %s: %w", folder.Path, err)
+		}
+	}
+
+	return folders, nil
 }

@@ -1,6 +1,15 @@
 # ownarr
 
-Ownarr enforces file ownership and permissions on your media folders.
+Ownarr enforces file ownership and permissions on your media folders with support for separate file and folder permissions, and automatic Trash Guides folder structure setup.
+
+## Features
+
+- 🔧 **Separate File & Folder Permissions**: Configure different permissions for files vs directories
+- 📁 **Trash Guides Integration**: Automatically create and manage the recommended Trash Guides folder structure
+- ⚙️ **Flexible Configuration**: YAML configuration with environment variable support
+- 🔄 **Periodic Monitoring**: Configurable polling interval for continuous enforcement
+- 🌐 **Health Monitoring**: Built-in HTTP health check endpoint
+- 📊 **Rich Logging**: Beautiful colored logging with configurable levels
 
 ## Usage
 
@@ -31,31 +40,72 @@ Or with Docker:
 docker run -e CONFIG_FILE="/config.yaml" -v ./config.yaml:/config.yaml -v ./data:/data ghcr.io/keksiqc/ownarr:latest
 ```
 
-The configuration file supports all the same options as the environment variables:
+### Trash Guides Integration
+
+Ownarr can automatically create and manage the [Trash Guides](https://trash-guides.info/) recommended folder structure:
 
 ```yaml
-# Port to listen on (default: 8080)
-port: 8080
+trashGuides:
+  enabled: true
+  type: "usenet"  # "usenet" or "torrent"
+  rootPath: "/data"
+  mediaTypes: ["movies", "tv", "music", "books"]
+  createStructure: true
+  uid: 1000
+  gid: 1000
+  folderMode: 755
+  fileMode: 644
+```
 
-# Log level (default: "info")
-logLevel: "info"
+This will create the recommended structure:
+- **Usenet**: `/data/{media,torrents,usenet}/{movies,tv,music,books}` with `usenet/complete` and `usenet/incomplete`
+- **Torrent**: `/data/{media,torrents}/{movies,tv,music,books}`
 
-# Polling interval for checking folder changes (default: "30s")
-pollInterval: "30s"
+### Separate File & Folder Permissions
 
-# Timezone for logging and scheduling (default: "UTC")
-timezone: "UTC"
+Configure different permissions for files and directories:
 
-# List of folders to monitor (new format - recommended)
+```yaml
 folders:
   - path: "/data/media"
     uid: 1000
     gid: 1000
-    mode: 755
+    folderMode: 755  # rwxr-xr-x for directories
+    fileMode: 644    # rw-r--r-- for files
+```
+
+The configuration file supports all the same options as the environment variables plus advanced features:
+
+```yaml
+# Basic configuration
+port: 8080
+logLevel: "info"
+pollInterval: "30s"
+timezone: "UTC"
+
+# Trash Guides folder structure setup (optional)
+trashGuides:
+  enabled: true
+  type: "usenet"  # "usenet" or "torrent"
+  rootPath: "/data"
+  mediaTypes: ["movies", "tv", "music", "books"]
+  createStructure: true
+  uid: 1000
+  gid: 1000
+  folderMode: 755
+  fileMode: 644
+
+# Folder monitoring with separate file/folder permissions
+folders:
+  - path: "/data/media"
+    uid: 1000
+    gid: 1000
+    folderMode: 755  # Permissions for directories
+    fileMode: 644    # Permissions for files
   - path: "/data/downloads"
     uid: 1000
     gid: 1000
-    mode: 755
+    mode: 755        # Legacy: same permissions for files and folders
 ```
 
 See [config.example.yaml](config.example.yaml) for a complete example with comments.
@@ -72,27 +122,27 @@ folders:
 
 ### Examples
 
-**Docker Compose:**
+**Docker Compose with Trash Guides:**
 ```yaml
 services:
   ownarr:
     image: ghcr.io/keksiqc/ownarr:latest
     environment:
-      FOLDERS: "/movies:1000:1000:775,/tv:1000:1000:775"
+      CONFIG_FILE: "/config.yaml"
       TZ: "Europe/Berlin"
     volumes:
-      - ./movies:/movies
-      - ./tv:/tv
+      - ./ownarr-config.yaml:/config.yaml
+      - ./data:/data
 ```
 
-**Docker:**
+**Traditional Docker:**
 ```bash
 docker run -e FOLDERS="/data:1000:1000:775" -v ./data:/data ghcr.io/keksiqc/ownarr:latest
 ```
 
-**Binary:**
+**Binary with separate permissions:**
 ```bash
-export FOLDERS="/data:1000:1000:775"
+export CONFIG_FILE="./config.yaml"
 ./ownarr
 ```
 
@@ -103,11 +153,38 @@ The service exposes a health check endpoint at `http://localhost:8080/health`
 ## Building
 
 ```bash
+make build
+```
+
+Or with Docker:
+```bash
 docker build -t ownarr .
 ```
 
-## Configuration Format
+## Configuration Reference
 
+### Folder Configuration Formats
+
+**New format with separate permissions (recommended):**
+```yaml
+folders:
+  - path: "/path/to/folder"
+    uid: 1000
+    gid: 1000
+    folderMode: 755  # Permissions for directories (rwxr-xr-x)
+    fileMode: 644    # Permissions for files (rw-r--r--)
+```
+
+**Legacy format (backward compatible):**
+```yaml
+folders:
+  - path: "/path/to/folder"
+    uid: 1000
+    gid: 1000
+    mode: 755  # Same permissions for both files and directories
+```
+
+**Environment variable format:**
 Each folder configuration uses the format: `/path:uid:gid:mode`
 
 - **path**: Absolute path to the folder
@@ -116,3 +193,17 @@ Each folder configuration uses the format: `/path:uid:gid:mode`
 - **mode**: Octal permissions (e.g., 775 for rwxrwxr-x)
 
 Multiple folders can be specified by separating with commas.
+
+### Trash Guides Configuration
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `enabled` | bool | Enable Trash Guides folder structure |
+| `type` | string | Either "usenet" or "torrent" |
+| `rootPath` | string | Base path where structure will be created |
+| `mediaTypes` | []string | Media types to create folders for (default: movies, tv, music, books) |
+| `createStructure` | bool | Whether to create directories automatically |
+| `uid` | int | User ID for created directories |
+| `gid` | int | Group ID for created directories |
+| `folderMode` | int | Permissions for directories (octal) |
+| `fileMode` | int | Permissions for files (octal) |

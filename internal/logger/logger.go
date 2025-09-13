@@ -2,35 +2,36 @@ package logger
 
 import (
 	"context"
-	"log/slog"
 	"os"
+
+	"github.com/charmbracelet/log"
 )
 
 type Logger struct {
-	*slog.Logger
+	*log.Logger
 }
 
 func New(level string) *Logger {
-	var logLevel slog.Level
+	var logLevel log.Level
 	switch level {
 	case "debug":
-		logLevel = slog.LevelDebug
+		logLevel = log.DebugLevel
 	case "info":
-		logLevel = slog.LevelInfo
+		logLevel = log.InfoLevel
 	case "warn", "warning":
-		logLevel = slog.LevelWarn
+		logLevel = log.WarnLevel
 	case "error":
-		logLevel = slog.LevelError
+		logLevel = log.ErrorLevel
 	default:
-		logLevel = slog.LevelInfo
+		logLevel = log.InfoLevel
 	}
 
-	opts := &slog.HandlerOptions{
-		Level: logLevel,
-	}
-
-	handler := slog.NewTextHandler(os.Stdout, opts)
-	logger := slog.New(handler)
+	logger := log.NewWithOptions(os.Stdout, log.Options{
+		Level:           logLevel,
+		ReportCaller:    false,
+		ReportTimestamp: true,
+		TimeFormat:      "2006-01-02 15:04:05",
+	})
 
 	return &Logger{logger}
 }

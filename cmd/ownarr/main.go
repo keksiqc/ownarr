@@ -34,6 +34,7 @@ func main() {
 		"poll_interval", cfg.PollInterval,
 		"timezone", cfg.Timezone.String(),
 		"folders", len(cfg.Folders),
+		"trash_guides_enabled", cfg.TrashGuides != nil && cfg.TrashGuides.Enabled,
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())

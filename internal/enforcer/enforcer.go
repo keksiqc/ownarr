@@ -48,11 +48,21 @@ func (e *Enforcer) Stop() {
 func (e *Enforcer) watchFolder(ctx context.Context, folder config.Folder) {
 	defer e.wg.Done()
 
-	e.logger.Info("Starting initial enforcement",
-		"path", folder.Path,
-		"uid", folder.UID,
-		"gid", folder.GID,
-		"mode", fmt.Sprintf("%o", folder.Mode))
+	// Log the enforcement configuration for this folder
+	if folder.FolderMode != 0 && folder.FileMode != 0 {
+		e.logger.Info("Starting initial enforcement with separate permissions",
+			"path", folder.Path,
+			"uid", folder.UID,
+			"gid", folder.GID,
+			"folder_mode", fmt.Sprintf("%o", folder.FolderMode),
+			"file_mode", fmt.Sprintf("%o", folder.FileMode))
+	} else {
+		e.logger.Info("Starting initial enforcement",
+			"path", folder.Path,
+			"uid", folder.UID,
+			"gid", folder.GID,
+			"mode", fmt.Sprintf("%o", folder.Mode))
+	}
 
 	// Initial enforcement
 	e.enforceTree(folder)
@@ -139,27 +149,56 @@ func (e *Enforcer) enforceFile(folder config.Folder, path string, info os.FileIn
 		changed = true
 	}
 
+	// Determine target mode based on whether it's a file or directory
+	var targetMode os.FileMode
+	if info.IsDir() {
+		// Use FolderMode if specified, otherwise fall back to Mode
+		if folder.FolderMode != 0 {
+			targetMode = folder.FolderMode & os.ModePerm
+		} else {
+			targetMode = folder.Mode & os.ModePerm
+		}
+	} else {
+		// Use FileMode if specified, otherwise fall back to Mode
+		if folder.FileMode != 0 {
+			targetMode = folder.FileMode & os.ModePerm
+		} else {
+			targetMode = folder.Mode & os.ModePerm
+		}
+	}
+
 	// Check permissions
 	currentMode := info.Mode() & os.ModePerm
-	targetMode := folder.Mode & os.ModePerm
 	if currentMode != targetMode {
 		e.logger.Debug("Fixing permissions",
 			"path", path,
+			"type", func() string {
+				if info.IsDir() {
+					return "directory"
+				}
+				return "file"
+			}(),
 			"current_mode", fmt.Sprintf("%o", currentMode),
 			"target_mode", fmt.Sprintf("%o", targetMode))
 
-		if err := os.Chmod(path, folder.Mode); err != nil {
+		if err := os.Chmod(path, targetMode); err != nil {
 			return false, fmt.Errorf("chmod: %w", err)
 		}
 		changed = true
 	}
 
 	if changed {
-		e.logger.Info("Fixed file",
+		e.logger.Info("Fixed file/directory",
 			"path", path,
+			"type", func() string {
+				if info.IsDir() {
+					return "directory"
+				}
+				return "file"
+			}(),
 			"uid", folder.UID,
 			"gid", folder.GID,
-			"mode", fmt.Sprintf("%o", folder.Mode))
+			"mode", fmt.Sprintf("%o", targetMode))
 	}
 
 	return changed, nil
