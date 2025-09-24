@@ -1,8 +1,5 @@
 # Application configuration example
 
-# The port the application will listen on
-port: 8080
-
 # Logging level: debug, info, warning, error, critical
 log_level: "info"
 
