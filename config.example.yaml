@@ -1,5 +1,9 @@
 # Example configuration file for ownarr
 # This file demonstrates all available configuration options
+#
+# Note: Environment variables take precedence over config file settings.
+# You can set CONFIG_FILE environment variable to use this file,
+# but individual environment variables will override values in this file.
 
 # Port to listen on (default: 8080)
 port: 8080

@@ -65,7 +65,7 @@ func (f Folder) Validate() error {
 	}
 
 	if f.GID < 0 || f.GID > 65535 {
-	return fmt.Errorf("gid must be between 0 and 65535, got %d", f.GID)
+		return fmt.Errorf("gid must be between 0 and 65535, got %d", f.GID)
 	}
 
 	// Validate mode is within reasonable range (0-0777)
@@ -85,7 +85,7 @@ func (f Folder) Validate() error {
 	// Validate DirMode if specified
 	if f.DirMode != 0 {
 		dirMode := f.DirMode & os.ModePerm
-		if dirMode > 077 {
+		if dirMode > 0777 {
 			return fmt.Errorf("dirMode must be between 0 and 0777, got %o", dirMode)
 		}
 	}
@@ -109,6 +109,7 @@ func (c Config) String() string {
 }
 
 // Load loads the configuration from environment variables or a YAML file
+// Environment variables will override values from the config file
 func Load() (*Config, error) {
 	cfg := &Config{}
 
@@ -122,7 +123,7 @@ func Load() (*Config, error) {
 		// Load from environment variables
 		if err := cfg.loadFromEnv(); err != nil {
 			return nil, fmt.Errorf("failed to load config from environment: %w", err)
-		}
+	}
 	}
 
 	// Apply defaults for any unset values
@@ -149,11 +150,11 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Timezone == nil {
 		loc, err := time.LoadLocation(DefaultTimezone)
-		if err == nil {
-			c.Timezone = loc
-		} else {
-			c.Timezone = time.UTC
+		if err != nil {
+			// Fallback to UTC if timezone is invalid
+			loc = time.UTC
 		}
+		c.Timezone = loc
 	}
 }
 
@@ -191,6 +192,7 @@ func (c *Config) Validate() error {
 }
 
 // loadFromFile loads configuration from a YAML file
+// Environment variables will override values loaded from the file
 func (c *Config) loadFromFile(filename string) error {
 	// Read the YAML file
 	data, err := os.ReadFile(filename)
@@ -204,7 +206,7 @@ func (c *Config) loadFromFile(filename string) error {
 		return fmt.Errorf("parsing config file %q: %w", filename, err)
 	}
 
-	// Apply YAML config values
+	// Apply YAML config values (will be potentially overridden by env vars)
 	if yamlConfig.Port != 0 {
 		c.Port = yamlConfig.Port
 	}
@@ -217,7 +219,7 @@ func (c *Config) loadFromFile(filename string) error {
 		duration, err := time.ParseDuration(yamlConfig.PollInterval)
 		if err != nil {
 			return fmt.Errorf("invalid pollInterval in config file: %w", err)
-		}
+	}
 		c.PollInterval = duration
 	}
 
@@ -225,18 +227,57 @@ func (c *Config) loadFromFile(filename string) error {
 		loc, err := time.LoadLocation(yamlConfig.Timezone)
 		if err != nil {
 			return fmt.Errorf("invalid timezone in config file: %w", err)
-		}
+	}
 		c.Timezone = loc
 	}
 
-	// Parse folders
-	c.Folders = make([]Folder, 0, len(yamlConfig.Folders))
-	for _, yamlFolder := range yamlConfig.Folders {
+	// Parse folders using common function
+	c.Folders, err = parseFolders(yamlConfig.Folders)
+	if err != nil {
+		return fmt.Errorf("parsing folders from config file: %w", err)
+	}
+
+	// Load basic config from environment to allow env vars to override file config
+	c.loadBasicConfigFromEnv()
+
+	return nil
+}
+
+// loadFromEnv loads configuration from environment variables
+func (c *Config) loadFromEnv() error {
+	// Load basic config values from environment
+	c.loadBasicConfigFromEnv()
+
+	// Load folders from environment variable as YAML format only
+	foldersEnv := os.Getenv("FOLDERS")
+	if foldersEnv == "" {
+		return fmt.Errorf("FOLDERS environment variable not set")
+	}
+
+	// Parse as YAML format only (removing legacy support)
+	var yamlFolders []YAMLFolder
+	if err := yaml.Unmarshal([]byte(foldersEnv), &yamlFolders); err != nil {
+		return fmt.Errorf("failed to parse FOLDERS environment variable as YAML: %w", err)
+	}
+
+	var err error
+	c.Folders, err = parseFolders(yamlFolders)
+	if err != nil {
+	return fmt.Errorf("parsing folders from environment: %w", err)
+	}
+
+	return nil
+}
+
+// parseFolders converts YAMLFolder structs to Folder structs with proper mode fallbacks
+func parseFolders(yamlFolders []YAMLFolder) ([]Folder, error) {
+	folders := make([]Folder, 0, len(yamlFolders))
+	for _, yamlFolder := range yamlFolders {
 		// If FileMode or DirMode are not set, use Mode as fallback
-		fileMode := os.FileMode(yamlFolder.FileMode)
+	fileMode := os.FileMode(yamlFolder.FileMode)
 		if fileMode == 0 {
 			fileMode = os.FileMode(yamlFolder.Mode)
-		}
+	}
 		
 		dirMode := os.FileMode(yamlFolder.DirMode)
 		if dirMode == 0 {
@@ -251,15 +292,13 @@ func (c *Config) loadFromFile(filename string) error {
 			FileMode: fileMode,
 			DirMode:  dirMode,
 		}
-		c.Folders = append(c.Folders, folder)
+		folders = append(folders, folder)
 	}
-
-	return nil
+	return folders, nil
 }
 
-// loadFromEnv loads configuration from environment variables
-func (c *Config) loadFromEnv() error {
-	// Load basic config values from environment
+// loadBasicConfigFromEnv loads basic configuration values from environment variables
+func (c *Config) loadBasicConfigFromEnv() {
 	if portStr := os.Getenv("PORT"); portStr != "" {
 		if port, err := strconv.Atoi(portStr); err == nil {
 			c.Port = port
@@ -281,46 +320,4 @@ func (c *Config) loadFromEnv() error {
 			c.Timezone = loc
 		}
 	}
-
-	// Load folders from environment variable as YAML format only
-	foldersEnv := os.Getenv("FOLDERS")
-	if foldersEnv == "" {
-		return fmt.Errorf("FOLDERS environment variable not set")
-	}
-
-	// Parse as YAML format only (removing legacy support)
-	var yamlFolders []YAMLFolder
-	if err := yaml.Unmarshal([]byte(foldersEnv), &yamlFolders); err != nil {
-		return fmt.Errorf("failed to parse FOLDERS environment variable as YAML: %w", err)
-	}
-
-	c.Folders = make([]Folder, 0, len(yamlFolders))
-	for _, yamlFolder := range yamlFolders {
-		// If FileMode or DirMode are not set, use Mode as fallback
-		fileMode := os.FileMode(yamlFolder.FileMode)
-		if fileMode == 0 {
-			fileMode = os.FileMode(yamlFolder.Mode)
-		}
-		
-		dirMode := os.FileMode(yamlFolder.DirMode)
-		if dirMode == 0 {
-			dirMode = os.FileMode(yamlFolder.Mode)
-		}
-		
-		folder := Folder{
-			Path:     yamlFolder.Path,
-			UID:      yamlFolder.UID,
-			GID:      yamlFolder.GID,
-			Mode:     os.FileMode(yamlFolder.Mode),
-			FileMode: fileMode,
-			DirMode:  dirMode,
-		}
-		c.Folders = append(c.Folders, folder)
-	}
-
-	return nil
 }
-
-// The legacy folder configuration format has been removed.
-// Use the YAML format instead:
-// FOLDERS='[{"path":"/data/media","uid":1000,"gid":1000,"mode":755,"fileMode":644,"dirMode":755}]'
