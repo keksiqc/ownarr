@@ -1,5 +1,5 @@
 module github.com/keksiqc/ownarr
 
-go 1.24.5
+go 1.25
 
 require gopkg.in/yaml.v3 v3.0.1
