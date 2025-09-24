@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -21,10 +20,12 @@ const (
 
 // YAMLFolder represents a folder configuration in the YAML file
 type YAMLFolder struct {
-	Path string `yaml:"path"`
-	UID  int    `yaml:"uid"`
-	GID  int    `yaml:"gid"`
-	Mode int    `yaml:"mode"`
+	Path      string `yaml:"path"`
+	UID       int    `yaml:"uid"`
+	GID       int    `yaml:"gid"`
+	Mode      int    `yaml:"mode"`      // Default mode for the folder itself
+	FileMode  int    `yaml:"fileMode,omitempty"`  // Mode for files (optional, falls back to Mode)
+	DirMode   int    `yaml:"dirMode,omitempty"`   // Mode for subdirectories (optional, falls back to Mode)
 }
 
 // YAMLConfig represents the structure of the YAML configuration file
@@ -38,10 +39,12 @@ type YAMLConfig struct {
 
 // Folder represents a folder configuration with validated values
 type Folder struct {
-	Path string
-	UID  int
-	GID  int
-	Mode os.FileMode
+	Path     string
+	UID      int
+	GID      int
+	Mode     os.FileMode
+	FileMode os.FileMode // Mode for files within the folder
+	DirMode  os.FileMode // Mode for subdirectories within the folder
 }
 
 // Validate checks that the folder configuration is valid
@@ -62,13 +65,29 @@ func (f Folder) Validate() error {
 	}
 
 	if f.GID < 0 || f.GID > 65535 {
-		return fmt.Errorf("gid must be between 0 and 65535, got %d", f.GID)
+	return fmt.Errorf("gid must be between 0 and 65535, got %d", f.GID)
 	}
 
 	// Validate mode is within reasonable range (0-0777)
 	mode := f.Mode & os.ModePerm
 	if mode > 0777 {
 		return fmt.Errorf("mode must be between 0 and 0777, got %o", mode)
+	}
+
+	// Validate FileMode if specified
+	if f.FileMode != 0 {
+		fileMode := f.FileMode & os.ModePerm
+		if fileMode > 0777 {
+			return fmt.Errorf("fileMode must be between 0 and 0777, got %o", fileMode)
+		}
+	}
+
+	// Validate DirMode if specified
+	if f.DirMode != 0 {
+		dirMode := f.DirMode & os.ModePerm
+		if dirMode > 077 {
+			return fmt.Errorf("dirMode must be between 0 and 0777, got %o", dirMode)
+		}
 	}
 
 	return nil
@@ -213,11 +232,24 @@ func (c *Config) loadFromFile(filename string) error {
 	// Parse folders
 	c.Folders = make([]Folder, 0, len(yamlConfig.Folders))
 	for _, yamlFolder := range yamlConfig.Folders {
+		// If FileMode or DirMode are not set, use Mode as fallback
+		fileMode := os.FileMode(yamlFolder.FileMode)
+		if fileMode == 0 {
+			fileMode = os.FileMode(yamlFolder.Mode)
+		}
+		
+		dirMode := os.FileMode(yamlFolder.DirMode)
+		if dirMode == 0 {
+			dirMode = os.FileMode(yamlFolder.Mode)
+		}
+		
 		folder := Folder{
-			Path: yamlFolder.Path,
-			UID:  yamlFolder.UID,
-			GID:  yamlFolder.GID,
-			Mode: os.FileMode(yamlFolder.Mode),
+			Path:     yamlFolder.Path,
+			UID:      yamlFolder.UID,
+			GID:      yamlFolder.GID,
+			Mode:     os.FileMode(yamlFolder.Mode),
+			FileMode: fileMode,
+			DirMode:  dirMode,
 		}
 		c.Folders = append(c.Folders, folder)
 	}
@@ -250,98 +282,45 @@ func (c *Config) loadFromEnv() error {
 		}
 	}
 
-	// Load folders from environment variable
+	// Load folders from environment variable as YAML format only
 	foldersEnv := os.Getenv("FOLDERS")
 	if foldersEnv == "" {
 		return fmt.Errorf("FOLDERS environment variable not set")
 	}
 
-	// Try to parse as new YAML format first, fallback to legacy format
-	if strings.Contains(foldersEnv, "{") {
-		// Try to parse as YAML
-		var yamlFolders []YAMLFolder
-		if err := yaml.Unmarshal([]byte(foldersEnv), &yamlFolders); err == nil {
-			c.Folders = make([]Folder, 0, len(yamlFolders))
-			for _, yamlFolder := range yamlFolders {
-				folder := Folder{
-					Path: yamlFolder.Path,
-					UID:  yamlFolder.UID,
-					GID:  yamlFolder.GID,
-					Mode: os.FileMode(yamlFolder.Mode),
-				}
-				c.Folders = append(c.Folders, folder)
-			}
-			return nil
-		}
+	// Parse as YAML format only (removing legacy support)
+	var yamlFolders []YAMLFolder
+	if err := yaml.Unmarshal([]byte(foldersEnv), &yamlFolders); err != nil {
+		return fmt.Errorf("failed to parse FOLDERS environment variable as YAML: %w", err)
 	}
 
-	// Fallback to legacy format
-	parts := strings.Split(foldersEnv, ",")
-	if len(parts) == 0 {
-		return fmt.Errorf("no folders specified in FOLDERS environment variable")
-	}
-
-	c.Folders = make([]Folder, 0, len(parts))
-
-	for i, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
+	c.Folders = make([]Folder, 0, len(yamlFolders))
+	for _, yamlFolder := range yamlFolders {
+		// If FileMode or DirMode are not set, use Mode as fallback
+		fileMode := os.FileMode(yamlFolder.FileMode)
+		if fileMode == 0 {
+			fileMode = os.FileMode(yamlFolder.Mode)
 		}
-
-		folder, err := parseLegacyFolderConfig(part)
-		if err != nil {
-			return fmt.Errorf("invalid folder config at position %d (%q): %w", i, part, err)
+		
+		dirMode := os.FileMode(yamlFolder.DirMode)
+		if dirMode == 0 {
+			dirMode = os.FileMode(yamlFolder.Mode)
 		}
-
+		
+		folder := Folder{
+			Path:     yamlFolder.Path,
+			UID:      yamlFolder.UID,
+			GID:      yamlFolder.GID,
+			Mode:     os.FileMode(yamlFolder.Mode),
+			FileMode: fileMode,
+			DirMode:  dirMode,
+		}
 		c.Folders = append(c.Folders, folder)
-	}
-
-	if len(c.Folders) == 0 {
-		return fmt.Errorf("no valid folders found in FOLDERS environment variable")
 	}
 
 	return nil
 }
 
-// parseLegacyFolderConfig parses the legacy folder configuration format
-func parseLegacyFolderConfig(config string) (Folder, error) {
-	parts := strings.Split(config, ":")
-	if len(parts) != 4 {
-		return Folder{}, fmt.Errorf("expected format: /path:uid:gid:mode, got %d parts", len(parts))
-	}
-
-	path := parts[0]
-	if path == "" {
-		return Folder{}, fmt.Errorf("path cannot be empty")
-	}
-
-	uid, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return Folder{}, fmt.Errorf("invalid uid %q: %w", parts[1], err)
-	}
-
-	gid, err := strconv.Atoi(parts[2])
-	if err != nil {
-		return Folder{}, fmt.Errorf("invalid gid %q: %w", parts[2], err)
-	}
-
-	mode, err := strconv.ParseUint(parts[3], 8, 32)
-	if err != nil {
-		return Folder{}, fmt.Errorf("invalid mode %q: %w", parts[3], err)
-	}
-
-	folder := Folder{
-		Path: path,
-		UID:  uid,
-		GID:  gid,
-		Mode: os.FileMode(mode),
-	}
-
-	// Validate the folder configuration
-	if err := folder.Validate(); err != nil {
-		return Folder{}, fmt.Errorf("invalid folder configuration: %w", err)
-	}
-
-	return folder, nil
-}
+// The legacy folder configuration format has been removed.
+// Use the YAML format instead:
+// FOLDERS='[{"path":"/data/media","uid":1000,"gid":1000,"mode":755,"fileMode":644,"dirMode":755}]'

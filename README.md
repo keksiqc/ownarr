@@ -9,7 +9,7 @@ Environment variables take precedence over config file settings.
 
 ### Environment Variables
 
-- `FOLDERS` - Required. Comma-separated list of folder configurations in format: `/path:uid:gid:mode`
+- `FOLDERS` - Required. YAML list of folder configurations (see format below)
 - `PORT` - HTTP server port (default: 8080)
 - `LOG_LEVEL` - Logging level: debug, info, warn, error (default: info)
 - `POLL_INTERVAL` - How often to check permissions (default: 30s)
@@ -46,29 +46,23 @@ pollInterval: "30s"
 # Timezone for logging and scheduling (default: "UTC")
 timezone: "UTC"
 
-# List of folders to monitor (new format - recommended)
+# List of folders to monitor
+# You can use just 'mode' for all files/directories, or specify 'fileMode' and 'dirMode' separately
 folders:
   - path: "/data/media"
     uid: 1000
     gid: 1000
-    mode: 755
+    mode: 755        # Default mode for the folder, and fallback for files/dirs if not specified
+    fileMode: 644    # Optional: specific permissions for files (uses 'mode' if not specified)
+    dirMode: 755     # Optional: specific permissions for subdirectories (uses 'mode' if not specified)
   - path: "/data/downloads"
     uid: 1000
     gid: 1000
-    mode: 755
+    mode: 755        # If fileMode and dirMode are omitted, everything uses this mode
 ```
 
 See [config.example.yaml](config.example.yaml) for a complete example with comments.
 
-### Legacy Configuration Format
-
-The legacy folder configuration format is still supported for backward compatibility:
-
-```yaml
-folders:
-  - "/data/media:1000:1000:755"
-  - "/data/downloads:1000:1000:755"
-```
 
 ### Examples
 
@@ -78,7 +72,7 @@ services:
   ownarr:
     image: ghcr.io/keksiqc/ownarr:latest
     environment:
-      FOLDERS: "/movies:1000:1000:775,/tv:1000:1000:775"
+      FOLDERS: '[{"path":"/movies","uid":1000,"gid":1000,"mode":775},{"path":"/tv","uid":1000,"gid":1000,"mode":775}]'
       TZ: "Europe/Berlin"
     volumes:
       - ./movies:/movies
@@ -87,12 +81,12 @@ services:
 
 **Docker:**
 ```bash
-docker run -e FOLDERS="/data:1000:1000:775" -v ./data:/data ghcr.io/keksiqc/ownarr:latest
+docker run -e FOLDERS='[{"path":"/data","uid":1000,"gid":1000,"mode":775}]' -v ./data:/data ghcr.io/keksiqc/ownarr:latest
 ```
 
 **Binary:**
 ```bash
-export FOLDERS="/data:1000:1000:775"
+export FOLDERS='[{"path":"/data","uid":1000,"gid":1000,"mode":755}]'
 ./ownarr
 ```
 
@@ -108,11 +102,18 @@ docker build -t ownarr .
 
 ## Configuration Format
 
-Each folder configuration uses the format: `/path:uid:gid:mode`
+Each folder configuration in the YAML file uses the following format:
 
 - **path**: Absolute path to the folder
 - **uid**: User ID to set ownership to
 - **gid**: Group ID to set ownership to
-- **mode**: Octal permissions (e.g., 775 for rwxrwxr-x)
+- **mode**: Default octal permissions for the main folder and fallback for files/dirs if fileMode/dirMode not specified
+- **fileMode**: (Optional) Octal permissions for files within the folder (uses 'mode' if not specified)
+- **dirMode**: (Optional) Octal permissions for subdirectories within the folder (uses 'mode' if not specified)
 
-Multiple folders can be specified by separating with commas.
+For environment variables, use a YAML array format:
+```bash
+FOLDERS='[{"path":"/data","uid":1000,"gid":1000,"mode":775,"fileMode":644,"dirMode":755}]'
+```
+
+You can use just 'mode' if you want the same permissions for everything, or specify 'fileMode' and/or 'dirMode' for more granular control.
