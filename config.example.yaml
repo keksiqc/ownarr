@@ -1,41 +1,25 @@
-# Example configuration file for ownarr
-# This file demonstrates all available configuration options
-#
-# Note: Environment variables take precedence over config file settings.
-# You can set CONFIG_FILE environment variable to use this file,
-# but individual environment variables will override values in this file.
+# Application configuration example
 
-# Port to listen on (default: 8080)
+# The port the application will listen on
 port: 8080
 
-# Log level (default: "info")
-# Valid values: "debug", "info", "warn", "error"
-logLevel: "info"
+# Logging level: debug, info, warning, error, critical
+log_level: "info"
 
-# Polling interval for checking folder changes (default: "30s")
-# Format: number with unit (e.g., "10s", "5m", "1h")
-pollInterval: "30s"
+poll_interval: 30  # Interval in seconds to poll for changes
 
-# Timezone for logging and scheduling (default: "UTC")
-# Uses standard timezone names (e.g., "America/New_York", "Europe/London")
-timezone: "UTC"
-
-# List of folders to monitor
-# New format (recommended):
-# You can use just 'mode' for all files/directories, or specify 'fileMode' and 'dirMode' separately
-folders:
+# Directories to watch for changes
+watch_dirs:
   - path: "/data/media"
-    uid: 1000
-    gid: 1000
-    mode: 755        # Default mode for the folder, and fallback for files/dirs if not specified
-    fileMode: 644    # Optional: specific permissions for files (uses 'mode' if not specified)
-    dirMode: 755     # Optional: specific permissions for subdirectories (uses 'mode' if not specified)
-  - path: "/data/downloads"
-    uid: 1000
-    gid: 1000
-    mode: 755        # If fileMode and dirMode are omitted, everything uses this mode
-    # fileMode: 644    # Uncomment to set specific file permissions
-    # dirMode: 755     # Uncomment to set specific directory permissions
-
-# Legacy format (removed):
-# The old format "/path:uid:gid:mode" is no longer supported.
+    recursive: true           # Watch subdirectories
+    exclude:                  # Patterns to exclude from watching
+      - "temp"
+      - "*.tmp"
+      - "*.bak"               # Exclude backup files
+      - ".DS_Store"           # Exclude macOS metadata files
+    include:                  # (Optional) Patterns to explicitly include
+      - "*.mp4"
+      - "*.mkv"
+      - "*.avi"
+    file_mode: "0644"         # Default file permissions
+    dir_mode: "0755"          # Default directory permissions
