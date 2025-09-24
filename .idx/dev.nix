@@ -4,6 +4,7 @@
     pkgs.go
     pkgs.golangci-lint
     pkgs.gnumake
+    pkgs.qwen-code
   ];
   services = {
     docker.enable = true;
@@ -18,5 +19,6 @@
     "antfu.icons-carbon"
     "antfu.file-nesting"
     "redhat.vscode-yaml"
+    "ms-azuretools.vscode-containers"
   ];
 }
