@@ -81,11 +81,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed to create watcher", "error", err)
 	}
-	defer func() {
-		if err := w.Close(); err != nil {
-			logger.Error("Failed to close watcher", "error", err)
-		}
-	}()
+	// Watcher will be closed explicitly in shutdown sequence
 
 	// Initialize processor
 	proc := processor.New(logger)
@@ -104,9 +100,16 @@ func main() {
 	<-sigChan
 	logger.Info("Received shutdown signal, stopping...")
 
-	// Cancel context and wait a bit for graceful shutdown
+	// Cancel context to signal all goroutines to stop
 	cancel()
-	time.Sleep(1 * time.Second)
+
+	// Close watcher properly
+	if err := w.Close(); err != nil {
+		logger.Error("Error during shutdown", "error", err)
+	}
+
+	// Give a moment for cleanup
+	time.Sleep(500 * time.Millisecond)
 
 	logger.Info("Application stopped")
 }

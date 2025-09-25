@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/log"
@@ -13,12 +14,12 @@ import (
 	"github.com/keksiqc/ownarr/internal/config"
 )
 
-// Event represents a file system event
+// Event represents a file system event with associated metadata
 type Event struct {
-	Path      string
-	Operation string
-	WatchDir  config.WatchDir
-	Timestamp time.Time
+	Path      string          // Full path to the file or directory
+	Operation string          // Type of operation (CREATE, WRITE, REMOVE, etc.)
+	WatchDir  config.WatchDir // Associated watch directory configuration
+	Timestamp time.Time       // When the event occurred
 }
 
 // Watcher watches directories for file changes
@@ -28,6 +29,8 @@ type Watcher struct {
 	events    chan Event
 	errors    chan error
 	config    *config.Config
+	done      chan struct{}  // For coordinating shutdown
+	wg        sync.WaitGroup // Wait for goroutines to finish
 }
 
 // New creates a new directory watcher
@@ -43,6 +46,7 @@ func New(cfg *config.Config, logger *log.Logger) (*Watcher, error) {
 		events:    make(chan Event, 100),
 		errors:    make(chan error, 10),
 		config:    cfg,
+		done:      make(chan struct{}),
 	}, nil
 }
 
@@ -57,11 +61,19 @@ func (w *Watcher) Start(ctx context.Context) error {
 	}
 
 	// Start event processing goroutine
-	go w.processEvents(ctx)
+	w.wg.Add(1)
+	go func() {
+		defer w.wg.Done()
+		w.processEvents(ctx)
+	}()
 
 	// Start polling goroutine if poll interval is configured
 	if w.config.PollInterval > 0 {
-		go w.startPolling(ctx)
+		w.wg.Add(1)
+		go func() {
+			defer w.wg.Done()
+			w.startPolling(ctx)
+		}()
 		w.logger.Info("Started polling", "interval_seconds", w.config.PollInterval)
 	}
 
@@ -80,9 +92,32 @@ func (w *Watcher) Errors() <-chan error {
 
 // Close closes the watcher and releases resources
 func (w *Watcher) Close() error {
+	// Signal shutdown to all goroutines
+	select {
+	case <-w.done:
+		// Already closed
+		return nil
+	default:
+		close(w.done)
+	}
+
+	// Close fsnotify watcher first to stop new events
+	var fsErr error
+	if w.fsWatcher != nil {
+		fsErr = w.fsWatcher.Close()
+		if fsErr != nil {
+			w.logger.Error("Error closing fsnotify watcher", "error", fsErr)
+		}
+	}
+
+	// Wait for all goroutines to finish
+	w.wg.Wait()
+
+	// Close channels after goroutines are done
 	close(w.events)
 	close(w.errors)
-	return w.fsWatcher.Close()
+
+	return fsErr
 }
 
 // startPolling starts the periodic polling process
@@ -96,6 +131,9 @@ func (w *Watcher) startPolling(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			w.logger.Debug("Stopping polling due to context cancellation")
+			return
+		case <-w.done:
+			w.logger.Debug("Stopping polling due to watcher shutdown")
 			return
 		case <-ticker.C:
 			w.logger.Debug("Starting periodic permissions check")
@@ -138,6 +176,8 @@ func (w *Watcher) checkDirectoryPermissions(watchDir config.WatchDir) {
 			Timestamp: time.Now(),
 		}:
 			w.logger.Debug("Generated polling event", "path", path, "operation", operation)
+		case <-w.done:
+			return fmt.Errorf("shutdown requested") // Stop walking if shutting down
 		default:
 			w.logger.Warn("Event channel full during polling, skipping", "path", path)
 		}
@@ -194,6 +234,8 @@ func (w *Watcher) processEvents(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-w.done:
+			return
 
 		case event, ok := <-w.fsWatcher.Events:
 			if !ok {
@@ -222,6 +264,8 @@ func (w *Watcher) processEvents(ctx context.Context) {
 				WatchDir:  *watchDir,
 				Timestamp: time.Now(),
 			}:
+			case <-w.done:
+				return
 			default:
 				w.logger.Warn("Event channel full, dropping event", "path", event.Name)
 			}
@@ -233,6 +277,8 @@ func (w *Watcher) processEvents(ctx context.Context) {
 
 			select {
 			case w.errors <- err:
+			case <-w.done:
+				return
 			default:
 				w.logger.Error("Error channel full, dropping error", "error", err)
 			}

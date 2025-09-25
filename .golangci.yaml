@@ -4,11 +4,33 @@ run:
 
 linters:
   enable:
+    - bodyclose
+    - copyloopvar
+    - dogsled
+    - dupl
     - errcheck
+    - errorlint
+    - gocheckcompilerdirectives
+    - gochecknoinits
+    - goconst
+    - gocritic
+    - gocyclo
+    - godox
+    - goprintffuncname
     - govet
+    - intrange
     - ineffassign
+    - lll
+    - misspell
+    - nakedret
+    - noctx
+    - nolintlint
     - staticcheck
+    - testifylint
+    - unconvert
+    - unparam
     - unused
+    - whitespace
 
 formatters:
   enable:

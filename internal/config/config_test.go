@@ -122,6 +122,6 @@ watch_dirs:
 
 func TestLoadConfigFileNotFound(t *testing.T) {
 	_, err := Load("nonexistent.yaml")
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "config file not found")
 }

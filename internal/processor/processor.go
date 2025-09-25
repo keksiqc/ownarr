@@ -120,6 +120,7 @@ func (p *Processor) handleChmod(event watcher.Event) {
 func (p *Processor) handlePollCheck(event watcher.Event) {
 	stat, err := os.Stat(event.Path)
 	if err != nil {
+		// File might have been deleted between poll generation and processing
 		p.logger.Debug("Failed to stat file during polling", "path", event.Path, "error", err)
 		return
 	}
@@ -146,10 +147,16 @@ func (p *Processor) handlePollCheckDir(event watcher.Event) {
 
 // fixPermissions sets the correct permissions on a file or directory
 func (p *Processor) fixPermissions(path string, modeStr string, isDir bool) {
+	// Validate mode string is not empty
+	if modeStr == "" {
+		p.logger.Warn("Empty mode string provided", "path", path)
+		return
+	}
+
 	// Parse the mode string (e.g., "0644" -> 0644)
 	mode, err := strconv.ParseUint(modeStr, 8, 32)
 	if err != nil {
-		p.logger.Error("Invalid file mode", "mode", modeStr, "error", err)
+		p.logger.Error("Invalid file mode format", "mode", modeStr, "path", path, "error", err)
 		return
 	}
 
